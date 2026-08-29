@@ -13,6 +13,15 @@ class Weapon {
         this.color = this.stats.color || '#ff6600';
         this.infinite = !!(this.stats.infinite);
         this.spawnFrom = this.stats.spawnFrom || 'muzzle';
+        this.projectileCount = this.stats.projectileCount || 1;
+        this.spreadAngle = this.stats.spreadAngle || 0;
+        this.breaksTerrain = this.stats.breaksTerrain !== false;
+        this.maxLifetime = this.stats.maxLifetime !== undefined ? this.stats.maxLifetime : Infinity;
+        this.drill = !!(this.stats.drill);
+        this.drop = !!(this.stats.drop);
+        this.fallSpeed = this.stats.fallSpeed || 1.2;
+        this.dropWeapon = this.stats.dropWeapon || null;
+        this.heal = this.stats.heal || 0;
 
         this.icon = new Image();
         this.icon.src = this.stats.icon || 'img/guns/default.png';
@@ -44,6 +53,7 @@ class Weapon {
         this.angle = 0;
         this.power = 0;
         this.parabolaPoints = [];
+        this.parabolaSets = [];
         this.aimPoint = { x: 0, y: 0 };
 
         this.onMouseMove = (e) => {
@@ -84,10 +94,19 @@ class Weapon {
         const pos = this.getCanvasMousePos(canvas);
         this.aimPoint = pos;
 
+        if (this.heal) {
+            this.angle = 0;
+            this.power = 0;
+            this.parabolaPoints = [];
+            this.parabolaSets = [];
+            return { vx: 0, vy: 0 };
+        }
+
         if (this.spawnFrom === 'sky') {
             this.angle = Math.PI / 2;
             this.power = 4;
             this.parabolaPoints = [];
+            this.parabolaSets = [];
             return { vx: 0, vy: this.power };
         }
 
@@ -105,36 +124,73 @@ class Weapon {
         const vx = Math.cos(this.angle) * this.power;
         const vy = Math.sin(this.angle) * this.power;
 
-        this.parabolaPoints = [];
-        let simX = px;
-        let simY = py;
-        let simVx = vx;
-        let simVy = vy;
+        this.parabolaSets = this.getSpreadOffsets().map(off => {
+            const a = this.angle + off;
+            const svx = Math.cos(a) * this.power;
+            const svy = Math.sin(a) * this.power;
 
-        for (let i = 0; i < CONFIG.PARABOLA_STEPS; i++) {
-            this.parabolaPoints.push({ x: simX, y: simY });
-            simX += simVx;
-            simY += simVy;
-            simVy += this.gravity;
+            const pts = [];
+            let simX = px;
+            let simY = py;
+            let simVx = svx;
+            let simVy = svy;
 
-            const traveled = Math.hypot(simX - px, simY - py);
-            if (traveled >= this.range) break;
-        }
+            for (let i = 0; i < CONFIG.PARABOLA_STEPS; i++) {
+                pts.push({ x: simX, y: simY });
+                simX += simVx;
+                simY += simVy;
+                simVy += this.gravity;
+
+                const traveled = Math.hypot(simX - px, simY - py);
+                if (traveled >= this.range) break;
+            }
+            return pts;
+        });
+
+        this.parabolaPoints = this.parabolaSets[0] || [];
 
         return { vx, vy };
+    }
+
+    getSpreadOffsets() {
+        const n = this.projectileCount;
+        if (n <= 1) return [0];
+
+        const offsets = [];
+        for (let i = 0; i < n; i++) {
+            if (n % 2 === 1) {
+                offsets.push((i - Math.floor(n / 2)) * this.spreadAngle);
+            } else {
+                offsets.push((i - n / 2 + 0.5) * this.spreadAngle);
+            }
+        }
+        return offsets;
     }
 
     shoot() {
         if (!this.infinite && (this.cooldown > 0 || this.reloading || this.ammo <= 0)) return;
 
         const canvas = document.querySelector('canvas');
-        const { vx, vy } = this.calculateTrajectory(canvas);
-        const spawn = this.getSpawnPoint();
+        this.calculateTrajectory(canvas);
 
-        if (window.game && window.game.projectiles) {
-            window.game.projectiles.push(
-                new Projectile(spawn.x, spawn.y, vx, vy, this, this.aimPoint.x, this.aimPoint.y)
-            );
+        if (this.heal > 0) {
+            if (window.game && window.game.player) {
+                window.game.player.heal(this.heal);
+            }
+        } else {
+            const spawn = this.getSpawnPoint();
+
+            if (window.game && window.game.projectiles) {
+                for (const off of this.getSpreadOffsets()) {
+                    const a = this.angle + off;
+                    const vxo = Math.cos(a) * this.power;
+                    const vyo = Math.sin(a) * this.power;
+
+                    window.game.projectiles.push(
+                        new Projectile(spawn.x, spawn.y, vxo, vyo, this, this.aimPoint.x, this.aimPoint.y)
+                    );
+                }
+            }
         }
 
         this.cooldown = this.fireRate;
@@ -152,6 +208,13 @@ class Weapon {
     }
 
     getSpawnPoint() {
+        if (this.drop) {
+            const pad = CONFIG.DROP_SPAWN_PADDING !== undefined ? CONFIG.DROP_SPAWN_PADDING : 40;
+            return {
+                x: pad + Math.random() * (CONFIG.CANVAS_WIDTH - 2 * pad),
+                y: CONFIG.SKY_SPAWN_Y !== undefined ? CONFIG.SKY_SPAWN_Y : -30
+            };
+        }
         if (this.spawnFrom === 'sky') {
             return {
                 x: CONFIG.CANVAS_WIDTH / 2,
@@ -188,7 +251,7 @@ class Weapon {
     }
 
     draw(ctx) {
-        if (this.spawnFrom !== 'muzzle') return;
+        if (this.spawnFrom !== 'muzzle' || this.heal > 0) return;
 
         const px = this.player.getCenterX();
         const py = this.player.getCenterY();
@@ -212,15 +275,19 @@ class Weapon {
 
     drawParabola(ctx) {
         const alpha = this.guided ? 0.35 : 0.6;
-        for (let i = 0; i < this.parabolaPoints.length; i++) {
-            const p = this.parabolaPoints[i];
-            const fade = 1 - (i / this.parabolaPoints.length);
-            const size = 2 + fade * 2;
+        const sets = this.parabolaSets.length ? this.parabolaSets : [this.parabolaPoints];
 
-            ctx.fillStyle = `rgba(255, ${Math.floor(100 + fade * 155)}, 50, ${alpha * fade})`;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-            ctx.fill();
+        for (const pts of sets) {
+            for (let i = 0; i < pts.length; i++) {
+                const p = pts[i];
+                const fade = 1 - (i / pts.length);
+                const size = 2 + fade * 2;
+
+                ctx.fillStyle = `rgba(255, ${Math.floor(100 + fade * 155)}, 50, ${alpha * fade})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
     }
 }

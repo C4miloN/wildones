@@ -16,6 +16,7 @@ class Player {
         this.flashTimer = 0;
         this.flashDuration = 12;
         this.damagePopups = [];
+        this.pickupPopups = [];
 
         this.sideSamples = [];
         const r = this.width / 2;
@@ -40,6 +41,7 @@ class Player {
         this.gold = CONFIG.START_GOLD;
 
         this.inventoryLayout = null;
+        this.inventoryScroll = 0;
 
         this.mouse = { x: 0, y: 0 };
 
@@ -68,6 +70,7 @@ class Player {
             if (e.key === 'e' || e.key === 'E') {
                 this.inventoryOpen = !this.inventoryOpen;
                 this.inventoryLayout = null;
+                this.inventoryScroll = 0;
                 return;
             }
             if (e.key >= '1' && e.key <= '9') {
@@ -96,10 +99,21 @@ class Player {
             this.mouse = this.getCanvasMouse(e);
         };
 
+        this.onWheel = (e) => {
+            if (!this.inventoryOpen) return;
+            e.preventDefault();
+            const layout = this.getInventoryLayout();
+            this.inventoryScroll = Math.max(0, Math.min(
+                layout.maxScroll,
+                this.inventoryScroll + (e.deltaY > 0 ? 40 : -40)
+            ));
+        };
+
         window.addEventListener('keydown', this.onKeyDown);
         window.addEventListener('keyup', this.onKeyUp);
         window.addEventListener('mousedown', this.onShoot);
         window.addEventListener('mousemove', this.onMouseMoveUI);
+        window.addEventListener('wheel', this.onWheel);
     }
 
     getCanvasMouse(e) {
@@ -116,11 +130,19 @@ class Player {
         const pos = this.getCanvasMouse(e);
         const layout = this.getInventoryLayout();
 
-        for (const row of layout.items) {
-            const weapon = this.inventory[row.inventoryIndex];
-            if (!weapon.infinite && this.pointInRect(pos.x, pos.y, row.buy)) {
-                weapon.buy();
-                return;
+        if (this.pointInRect(pos.x, pos.y, layout.viewport)) {
+            for (const row of layout.items) {
+                const weapon = this.inventory[row.inventoryIndex];
+                if (!weapon.infinite &&
+                    this.pointInRect(pos.x, pos.y, {
+                        x: row.buy.x,
+                        y: row.buy.y - this.inventoryScroll,
+                        w: row.buy.w,
+                        h: row.buy.h
+                    })) {
+                    weapon.buy();
+                    return;
+                }
             }
         }
 
@@ -131,10 +153,17 @@ class Player {
             }
         }
 
-        for (const row of layout.items) {
-            if (this.pointInRect(pos.x, pos.y, row)) {
-                this.slots[this.activeSlot] = row.inventoryIndex;
-                return;
+        if (this.pointInRect(pos.x, pos.y, layout.viewport)) {
+            for (const row of layout.items) {
+                if (this.pointInRect(pos.x, pos.y, {
+                    x: row.x,
+                    y: row.y - this.inventoryScroll,
+                    w: row.w,
+                    h: row.h
+                })) {
+                    this.slots[this.activeSlot] = row.inventoryIndex;
+                    return;
+                }
             }
         }
     }
@@ -148,14 +177,14 @@ class Player {
         const cw = CONFIG.CANVAS_WIDTH;
         const ch = CONFIG.CANVAS_HEIGHT;
 
-        const panelW = 700;
-        const panelH = 470;
+        const panelW = 760;
+        const panelH = 500;
         const panelX = (cw - panelW) / 2;
         const panelY = (ch - panelH) / 2;
 
         const slots = [];
         const slotW = 130;
-        const slotH = 80;
+        const slotH = 72;
         const gap = 14;
         const slotsStartX = panelX + 20;
         const slotsY = panelY + 50;
@@ -169,15 +198,21 @@ class Player {
             });
         }
 
-        const cols = 3;
-        const cellGap = 16;
+        const cols = 5;
+        const cellGap = 14;
         const buyW = 92;
         const buyH = 22;
-        const cellW = 105;
+        const cellW = 122;
         const cellH = 88;
-        const gridY = panelY + 150;
         const gridW = cols * cellW + (cols - 1) * cellGap;
         const gridX = panelX + (panelW - gridW) / 2;
+        const gridY = panelY + 142;
+
+        const viewport = { x: panelX + 12, y: gridY - 8, w: panelW - 24, h: 240 };
+
+        const rows = Math.ceil(this.inventory.length / cols);
+        const contentH = rows * (cellH + cellGap) - cellGap;
+        const maxScroll = Math.max(0, contentH - viewport.h);
 
         const items = [];
         for (let i = 0; i < this.inventory.length; i++) {
@@ -201,7 +236,7 @@ class Player {
             });
         }
 
-        return { panel: { x: panelX, y: panelY, w: panelW, h: panelH }, slots, items };
+        return { panel: { x: panelX, y: panelY, w: panelW, h: panelH }, slots, viewport, maxScroll, items };
     }
 
     drawInventory(ctx) {
@@ -223,7 +258,7 @@ class Player {
         ctx.fillText(`Oro: ${this.gold}`, CONFIG.CANVAS_WIDTH / 2, p.y + 52);
         ctx.fillStyle = '#bbb';
         ctx.font = '11px monospace';
-        ctx.fillText('Clic en arma para asignar al slot activo  ·  Pulsa 1-4 para cambiar slot  ·  E para cerrar', CONFIG.CANVAS_WIDTH / 2, p.y + 70);
+        ctx.fillText('Clic en arma para asignar al slot activo  ·  Pulsa 1-4 para cambiar slot  ·  Rueda para desplazar  ·  E para cerrar', CONFIG.CANVAS_WIDTH / 2, p.y + p.h - 30);
 
         for (const slot of layout.slots) {
             const weapon = this.inventory[this.slots[slot.index]];
@@ -247,10 +282,16 @@ class Player {
         let hoveredWeapon = null;
         let hoveredRect = null;
 
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(layout.viewport.x, layout.viewport.y, layout.viewport.w, layout.viewport.h);
+        ctx.clip();
+        ctx.translate(0, -this.inventoryScroll);
+
         for (const cell of layout.items) {
             const weapon = this.inventory[cell.inventoryIndex];
             const inActiveSlot = this.slots[this.activeSlot] === cell.inventoryIndex;
-            const isHover = this.pointInRect(this.mouse.x, this.mouse.y, cell);
+            const isHover = this.pointInRect(this.mouse.x, this.mouse.y + this.inventoryScroll, cell);
 
             ctx.fillStyle = inActiveSlot ? 'rgba(67,160,71,0.2)' :
                 (isHover ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.04)');
@@ -268,7 +309,7 @@ class Player {
 
             if (!weapon.infinite) {
                 const canBuy = this.gold >= weapon.price;
-                const hoverBuy = isHover && this.pointInRect(this.mouse.x, this.mouse.y, cell.buy);
+                const hoverBuy = isHover && this.pointInRect(this.mouse.x, this.mouse.y + this.inventoryScroll, cell.buy);
 
                 ctx.fillStyle = canBuy ? (hoverBuy ? 'rgba(80,180,90,0.8)' : 'rgba(67,160,71,0.6)') :
                     'rgba(90,90,90,0.5)';
@@ -290,9 +331,30 @@ class Player {
 
             if (isHover) {
                 hoveredWeapon = weapon;
-                hoveredRect = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
+                hoveredRect = { x: cell.x, y: cell.y - this.inventoryScroll, w: cell.w, h: cell.h };
             }
         }
+
+        ctx.restore();
+
+        if (layout.maxScroll > 0) {
+            const trackW = 6;
+            const trackX = layout.viewport.x + layout.viewport.w - trackW - 4;
+            const trackY = layout.viewport.y + 4;
+            const trackH = layout.viewport.h - 8;
+            const thumbH = Math.max(20, trackH * (layout.viewport.h / (layout.viewport.h + layout.maxScroll)));
+            const thumbY = trackY + (trackH - thumbH) * (this.inventoryScroll / layout.maxScroll);
+
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.fillRect(trackX, trackY, trackW, trackH);
+            ctx.fillStyle = '#999';
+            ctx.fillRect(trackX, thumbY, trackW, thumbH);
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('Pulsa E para cerrar', CONFIG.CANVAS_WIDTH / 2, p.y + p.h - 12);
 
         if (hoveredWeapon && hoveredRect) {
             const lines = [
@@ -407,6 +469,7 @@ class Player {
         window.removeEventListener('keyup', this.onKeyUp);
         window.removeEventListener('mousedown', this.onShoot);
         window.removeEventListener('mousemove', this.onMouseMoveUI);
+        window.removeEventListener('wheel', this.onWheel);
     }
 
     update(terrain) {
@@ -446,6 +509,7 @@ class Player {
         this.x = Math.max(0, Math.min(CONFIG.CANVAS_WIDTH - this.width, this.x));
 
         this.updateDamagePopups();
+        this.updatePickupPopups();
         this.weapon.update(terrain);
     }
 
@@ -522,12 +586,37 @@ class Player {
         return this.hp;
     }
 
+    heal(amount) {
+        if (!this.isAlive() || amount <= 0) return this.hp;
+        this.hp = Math.min(this.maxHp, this.hp + amount);
+        this.addPickupPopup(`${Math.round(amount)} HP`);
+        return this.hp;
+    }
+
     updateDamagePopups() {
         for (const popup of this.damagePopups) {
             popup.y -= 1.2;
             popup.life--;
         }
         this.damagePopups = this.damagePopups.filter(p => p.life > 0);
+    }
+
+    addPickupPopup(text) {
+        this.pickupPopups.push({
+            x: this.getCenterX(),
+            y: this.y - 20,
+            value: text,
+            life: 80,
+            maxLife: 80
+        });
+    }
+
+    updatePickupPopups() {
+        for (const popup of this.pickupPopups) {
+            popup.y -= 1;
+            popup.life--;
+        }
+        this.pickupPopups = this.pickupPopups.filter(p => p.life > 0);
     }
 
     isAlive() {
@@ -565,8 +654,24 @@ class Player {
         ctx.fill();
 
         this.drawDamagePopups(ctx);
+        this.drawPickupPopups(ctx);
 
         this.weapon.draw(ctx);
+    }
+
+    drawPickupPopups(ctx) {
+        for (const popup of this.pickupPopups) {
+            const alpha = popup.life / popup.maxLife;
+
+            ctx.font = 'bold 12px monospace';
+            ctx.textAlign = 'center';
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
+            ctx.fillStyle = `rgba(76, 175, 80, ${alpha})`;
+            ctx.strokeText(`+${popup.value}`, popup.x, popup.y);
+            ctx.fillText(`+${popup.value}`, popup.x, popup.y);
+            ctx.textAlign = 'left';
+        }
     }
 
     drawDamagePopups(ctx) {

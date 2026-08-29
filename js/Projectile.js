@@ -14,8 +14,14 @@ class Projectile {
         this.gravity = weapon ? weapon.gravity : CONFIG.PROJECTILE_GRAVITY;
         this.bounceCount = weapon ? weapon.bounceCount : 0;
         this.guided = weapon ? weapon.guided : false;
-        this.breaksTerrain = weapon ? weapon.breaksTerrain : true;
+        this.breaksTerrain = weapon ? weapon.breaksTerrain !== false : true;
         this.maxLifetime = weapon && weapon.maxLifetime !== undefined ? weapon.maxLifetime : Infinity;
+        this.drill = weapon ? weapon.drill : false;
+        this.carveRadius = this.drill ? (this.destroyRadius || this.radius * 2) : 0;
+        this.drop = weapon ? weapon.drop : false;
+        this.fallSpeed = weapon && weapon.fallSpeed ? weapon.fallSpeed : 1.2;
+        this.dropWeaponName = weapon ? (weapon.dropWeapon || null) : null;
+        this.landed = false;
         this.color = weapon ? weapon.color : '#ff6600';
         this.image = weapon && weapon.projectileImage ? weapon.projectileImage : null;
         this.targetX = targetX;
@@ -25,6 +31,8 @@ class Projectile {
         this.exploded = false;
         this.directHit = false;
         this.lifetime = 0;
+        this.prevX = x;
+        this.prevY = y;
         this.trail = [];
         this.trailMaxLength = 15;
     }
@@ -39,8 +47,21 @@ class Projectile {
             return;
         }
 
-        this.trail.push({ x: this.x, y: this.y });
-        if (this.trail.length > this.trailMaxLength) this.trail.shift();
+        if (this.drop) {
+            const player = window.game ? window.game.player : null;
+            if (player && player.isAlive() && this.hitsPlayer(player)) {
+                this.pickup();
+                this.alive = false;
+                return;
+            }
+            this.updateDrop(terrain);
+            return;
+        }
+
+        if (!this.drill) {
+            this.trail.push({ x: this.x, y: this.y });
+            if (this.trail.length > this.trailMaxLength) this.trail.shift();
+        }
 
         if (this.guided && this.targetX !== undefined) {
             const dx = this.targetX - this.x;
@@ -54,6 +75,8 @@ class Projectile {
             this.vy += (desiredY - this.vy) * steer;
         }
 
+        this.prevX = this.x;
+        this.prevY = this.y;
         this.vy += this.gravity;
         this.x += this.vx;
         this.y += this.vy;
@@ -65,9 +88,24 @@ class Projectile {
             this.directHit = true;
             this.damagePlayer(player);
 
-            if (this.breaksTerrain) {
-                this.explode(terrain);
+            if (!this.breaksTerrain || this.drill) {
+                this.alive = false;
             } else {
+                this.explode(terrain);
+            }
+            return;
+        }
+
+        if (this.drill) {
+            this.drillThrough(terrain);
+
+            if (traveled >= this.range) {
+                this.alive = false;
+                return;
+            }
+
+            if (this.x < -50 || this.x > CONFIG.CANVAS_WIDTH + 50 ||
+                this.y < -50 || this.y > CONFIG.CANVAS_HEIGHT + 50) {
                 this.alive = false;
             }
             return;
@@ -118,6 +156,71 @@ class Projectile {
         this.y += this.vy;
         while (terrain.isSolid(this.x, this.y)) {
             this.x -= this.vx;
+        }
+    }
+
+    drillThrough(terrain) {
+        const segs = Math.max(1, Math.ceil(Math.hypot(this.x - this.prevX, this.y - this.prevY)));
+        const r = this.carveRadius;
+
+        for (let i = 0; i <= segs; i++) {
+            const t = i / segs;
+            const sx = this.prevX + (this.x - this.prevX) * t;
+            const sy = this.prevY + (this.y - this.prevY) * t;
+
+            if (terrain.isSolid(sx, sy)) {
+                terrain.destroy(sx, sy, r);
+                if (window.game && window.game.player) {
+                    window.game.player.gold += Math.round(r * 0.4);
+                }
+            }
+        }
+    }
+
+    updateDrop(terrain) {
+        if (this.landed) return;
+
+        this.vy = Math.min(this.vy + (this.gravity || 0.05), this.fallSpeed);
+        this.vx = Math.sin(this.lifetime * 0.05) * 0.6;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        if (terrain.isSolid(this.x, this.y)) {
+            this.landed = true;
+            while (terrain.isSolid(this.x, this.y)) this.y -= 1;
+            this.vx = 0;
+            this.vy = 0;
+        }
+
+        if (this.y > CONFIG.CANVAS_HEIGHT + 60) {
+            this.alive = false;
+        }
+    }
+
+    pickup() {
+        const game = window.game;
+        if (!game || !game.player) return;
+
+        const inventory = game.player.inventory || [];
+        let target = null;
+
+        if (this.dropWeaponName) {
+            target = inventory.find(w => w.name === this.dropWeaponName);
+        } else {
+            const candidates = inventory.filter(w => !w.infinite);
+            if (candidates.length > 0) {
+                target = candidates[Math.floor(Math.random() * candidates.length)];
+            }
+        }
+
+        if (target) {
+            target.stock += target.packSize;
+            if (target.ammo < target.maxAmmo) {
+                target.ammo = Math.min(target.maxAmmo, target.stock);
+            }
+            if (game.player.addPickupPopup) {
+                game.player.addPickupPopup(`${target.packSize} ${target.name}`);
+            }
         }
     }
 
