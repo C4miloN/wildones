@@ -41,6 +41,8 @@ class Player {
 
         this.inventoryLayout = null;
 
+        this.mouse = { x: 0, y: 0 };
+
         this.keys = { ' ': false, a: false, s: false, d: false };
 
         this.bindInput();
@@ -90,9 +92,14 @@ class Player {
             }
         };
 
+        this.onMouseMoveUI = (e) => {
+            this.mouse = this.getCanvasMouse(e);
+        };
+
         window.addEventListener('keydown', this.onKeyDown);
         window.addEventListener('keyup', this.onKeyUp);
         window.addEventListener('mousedown', this.onShoot);
+        window.addEventListener('mousemove', this.onMouseMoveUI);
     }
 
     getCanvasMouse(e) {
@@ -141,17 +148,17 @@ class Player {
         const cw = CONFIG.CANVAS_WIDTH;
         const ch = CONFIG.CANVAS_HEIGHT;
 
-        const panelW = 520;
-        const panelH = 440;
+        const panelW = 700;
+        const panelH = 470;
         const panelX = (cw - panelW) / 2;
         const panelY = (ch - panelH) / 2;
 
         const slots = [];
-        const slotW = 110;
-        const slotH = 70;
-        const gap = 12;
-        const slotsStartX = panelX + 15;
-        const slotsY = panelY + 55;
+        const slotW = 130;
+        const slotH = 80;
+        const gap = 14;
+        const slotsStartX = panelX + 20;
+        const slotsY = panelY + 50;
         for (let i = 0; i < this.slotCount; i++) {
             slots.push({
                 index: i,
@@ -162,25 +169,34 @@ class Player {
             });
         }
 
+        const cols = 3;
+        const cellGap = 16;
+        const buyW = 92;
+        const buyH = 22;
+        const cellW = 105;
+        const cellH = 88;
+        const gridY = panelY + 150;
+        const gridW = cols * cellW + (cols - 1) * cellGap;
+        const gridX = panelX + (panelW - gridW) / 2;
+
         const items = [];
-        const itemX = panelX + 15;
-        const itemY = panelY + 165;
-        const itemW = panelW - 30;
-        const itemH = 38;
-        const itemGap = 6;
         for (let i = 0; i < this.inventory.length; i++) {
-            const rowY = itemY + i * (itemH + itemGap);
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const cx = gridX + col * (cellW + cellGap);
+            const cy = gridY + row * (cellH + cellGap);
+
             items.push({
                 inventoryIndex: i,
-                x: itemX,
-                y: rowY,
-                w: itemW,
-                h: itemH,
+                x: cx,
+                y: cy,
+                w: cellW,
+                h: cellH,
                 buy: {
-                    x: itemX + itemW - 118,
-                    y: rowY + 4,
-                    w: 112,
-                    h: itemH - 8
+                    x: cx + (cellW - buyW) / 2,
+                    y: cy + cellH - buyH - 4,
+                    w: buyW,
+                    h: buyH
                 }
             });
         }
@@ -205,9 +221,9 @@ class Player {
         ctx.fillStyle = '#ffd700';
         ctx.font = 'bold 16px monospace';
         ctx.fillText(`Oro: ${this.gold}`, CONFIG.CANVAS_WIDTH / 2, p.y + 52);
-        //ctx.font = '12px monospace';
-        //ctx.fillStyle = '#bbb';
-        //ctx.fillText('Clic en un slot (o teclas 1-4) y luego clic en un arma para asignarla', CONFIG.CANVAS_WIDTH / 2, p.y + 72);
+        ctx.fillStyle = '#bbb';
+        ctx.font = '11px monospace';
+        ctx.fillText('Clic en arma para asignar al slot activo  ·  Pulsa 1-4 para cambiar slot  ·  E para cerrar', CONFIG.CANVAS_WIDTH / 2, p.y + 70);
 
         for (const slot of layout.slots) {
             const weapon = this.inventory[this.slots[slot.index]];
@@ -219,62 +235,92 @@ class Player {
             ctx.lineWidth = active ? 3 : 1;
             ctx.strokeRect(slot.x, slot.y, slot.w, slot.h);
 
+            this.drawIcon(ctx, weapon, slot.x + slot.w / 2, slot.y + slot.h / 2 - 2, 48);
+
             ctx.textAlign = 'center';
-            ctx.fillStyle = weapon.color;
-            ctx.font = 'bold 15px monospace';
-            const shortName = weapon.name.split(' ')[0];
-            ctx.fillText(`${slot.index + 1}. ${shortName}`, slot.x + slot.w / 2, slot.y + 24);
-            
             ctx.fillStyle = '#ccc';
             ctx.font = '12px monospace';
-            //const stockText = weapon.infinite ? '∞' : `${weapon.stock}`;
-            //ctx.fillText(stockText, slot.x + slot.w / 2, slot.y + 46);
+            ctx.fillText(weapon.infinite ? '∞' : `${weapon.stock}`, slot.x + slot.w / 2, slot.y + slot.h - 6);
             ctx.textAlign = 'left';
         }
 
-        for (const row of layout.items) {
-            const weapon = this.inventory[row.inventoryIndex];
-            const inActiveSlot = this.slots[this.activeSlot] === row.inventoryIndex;
+        let hoveredWeapon = null;
+        let hoveredRect = null;
 
-            ctx.fillStyle = inActiveSlot ? 'rgba(67,160,71,0.25)' : 'rgba(255,255,255,0.05)';
-            ctx.fillRect(row.x, row.y, row.w, row.h);
-            ctx.strokeStyle = inActiveSlot ? '#43a047' : '#555';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(row.x, row.y, row.w, row.h);
+        for (const cell of layout.items) {
+            const weapon = this.inventory[cell.inventoryIndex];
+            const inActiveSlot = this.slots[this.activeSlot] === cell.inventoryIndex;
+            const isHover = this.pointInRect(this.mouse.x, this.mouse.y, cell);
 
+            ctx.fillStyle = inActiveSlot ? 'rgba(67,160,71,0.2)' :
+                (isHover ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.04)');
+            ctx.fillRect(cell.x, cell.y, cell.w, cell.h);
+            ctx.strokeStyle = inActiveSlot ? '#43a047' : (isHover ? '#aaa' : '#444');
+            ctx.lineWidth = inActiveSlot ? 2 : 1;
+            ctx.strokeRect(cell.x, cell.y, cell.w, cell.h);
+
+            this.drawIcon(ctx, weapon, cell.x + cell.w / 2, cell.y + 26, 44);
+
+            ctx.textAlign = 'center';
             ctx.fillStyle = weapon.color;
-            ctx.font = 'bold 15px monospace';
-            ctx.fillText(weapon.name, row.x + 12, row.y + 24);
-            
-            ctx.fillStyle = '#aaa';
-            ctx.font = '12px monospace';
-            const stockText = weapon.infinite ? '∞' : `${weapon.stock}`;
-            ctx.fillText(stockText, row.x + 190, row.y + 24);
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText(weapon.name, cell.x + cell.w / 2, cell.y + 62);
 
-            ctx.fillStyle = '#999';
-            //ctx.fillText(`Daño ${weapon.damage} · Alcance ${weapon.range}`, row.x + 320, row.y + 24);
-            
             if (!weapon.infinite) {
                 const canBuy = this.gold >= weapon.price;
-                ctx.fillStyle = canBuy ? 'rgba(67,160,71,0.6)' : 'rgba(90,90,90,0.6)';
-                ctx.fillRect(row.buy.x, row.buy.y, row.buy.w, row.buy.h);
-                ctx.strokeStyle = canBuy ? '#43a047' : '#777';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(row.buy.x, row.buy.y, row.buy.w, row.buy.h);
+                const hoverBuy = isHover && this.pointInRect(this.mouse.x, this.mouse.y, cell.buy);
 
-                ctx.textAlign = 'center';
-                ctx.fillStyle = canBuy ? '#fff' : '#bbb';
-                ctx.font = 'bold 12px monospace';
-                //ctx.fillText(`Comprar +${weapon.packSize}`, row.buy.x + row.buy.w / 2, row.buy.y + 14);
-                ctx.fillText(`${weapon.packSize}`, row.buy.x + row.buy.w / 2, row.buy.y + 14);
+                ctx.fillStyle = canBuy ? (hoverBuy ? 'rgba(80,180,90,0.8)' : 'rgba(67,160,71,0.6)') :
+                    'rgba(90,90,90,0.5)';
+                ctx.fillRect(cell.buy.x, cell.buy.y, cell.buy.w, cell.buy.h);
+                ctx.strokeStyle = canBuy ? '#43a047' : '#666';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(cell.buy.x, cell.buy.y, cell.buy.w, cell.buy.h);
+
+                ctx.fillStyle = canBuy ? '#fff' : '#999';
+                ctx.font = 'bold 10px monospace';
+                ctx.fillText(`+${weapon.packSize} (${weapon.price} Oro)`, cell.buy.x + cell.buy.w / 2, cell.buy.y + 14);
+            } else {
                 ctx.fillStyle = '#ffd700';
-                ctx.fillText(`${weapon.price} Oro`, row.buy.x + row.buy.w / 2, row.buy.y + 26);
-                ctx.textAlign = 'left';
+                ctx.font = '10px monospace';
+                ctx.fillText('Munición infinita', cell.x + cell.w / 2, cell.y + cell.h - 14);
             }
 
+            ctx.textAlign = 'left';
+
+            if (isHover) {
+                hoveredWeapon = weapon;
+                hoveredRect = { x: cell.x, y: cell.y, w: cell.w, h: cell.h };
+            }
+        }
+
+        if (hoveredWeapon && hoveredRect) {
+            const lines = [
+                hoveredWeapon.name,
+                `Daño: ${hoveredWeapon.damage}  ·  Alcance: ${hoveredWeapon.range}`,
+                `Cadencia: ${hoveredWeapon.fireRate}/s  ·  Recarga: ${(hoveredWeapon.reloadTime / 60).toFixed(1)}s`
+            ];
+            const tw = 230;
+            const lh = 16;
+            const th = 8 + lines.length * lh;
+            const tx = hoveredRect.x + hoveredRect.w / 2 - tw / 2;
+            const ty = hoveredRect.y + hoveredRect.h + 8;
+
+            ctx.fillStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillRect(tx, ty, tw, th);
+            ctx.strokeStyle = '#888';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(tx, ty, tw, th);
+            ctx.textAlign = 'center';
+            ctx.fillStyle = hoveredWeapon.color;
+            ctx.font = 'bold 13px monospace';
+            ctx.fillText(lines[0], tx + tw / 2, ty + 16);
             ctx.fillStyle = '#fff';
-            ctx.font = '12px monospace';
-            ctx.fillText('Pulsa E para cerrar', CONFIG.CANVAS_WIDTH / 2, p.y + p.h - 16);
+            ctx.font = '11px monospace';
+            for (let i = 1; i < lines.length; i++) {
+                ctx.fillText(lines[i], tx + tw / 2, ty + 16 + i * lh);
+            }
+            ctx.textAlign = 'left';
         }
     }
 
@@ -285,27 +331,74 @@ class Player {
         const h = 34;
         const gap = 2;
 
+        let hoveredWeapon = null;
+        let hoverBox = null;
+
         for (let i = 0; i < this.slotCount; i++) {
             const weapon = this.inventory[this.slots[i]];
             const active = i === this.activeSlot;
+            const bx = x + i * (w + gap);
 
             ctx.fillStyle = active ? 'rgba(67,160,71,0.55)' : 'rgba(0,0,0,0.6)';
-            ctx.fillRect(x + i * (w + gap), y, w, h);
+            ctx.fillRect(bx, y, w, h);
             ctx.strokeStyle = active ? '#43a047' : '#777';
             ctx.lineWidth = active ? 2.5 : 1;
-            ctx.strokeRect(x + i * (w + gap), y, w, h);
+            ctx.strokeRect(bx, y, w, h);
 
-            ctx.fillStyle = weapon.color;
+            ctx.fillStyle = '#fff';
             ctx.font = 'bold 10px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText(`${i + 1}`, x + i * (w + gap) + 11, y + 12);
-            ctx.fillStyle = '#eee';
-            ctx.fillText(weapon.name.split(' ')[0], x + i * (w + gap) + w / 2 + 4, y + 21);
-
-            ctx.fillStyle = '#ccc';
-            ctx.font = '10px monospace';
-            ctx.fillText(weapon.infinite ? '∞' : `${weapon.stock}`, x + i * (w + gap) + w / 2 + 4, y + 30);
             ctx.textAlign = 'left';
+            ctx.fillText(`${i + 1}`, bx + 3, y + 11);
+
+            this.drawIcon(ctx, weapon, bx + w / 2, y + h / 2, 32);
+
+            if (weapon.infinite) {
+                ctx.fillStyle = '#ffd700';
+            } else if (weapon.stock <= 0) {
+                ctx.fillStyle = '#ff5252';
+            } else {
+                ctx.fillStyle = '#ccc';
+            }
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(weapon.infinite ? '∞' : `${weapon.stock}`, bx + w - 3, y + h - 3);
+            ctx.textAlign = 'left';
+
+            if (this.pointInRect(this.mouse.x, this.mouse.y, { x: bx, y, w, h })) {
+                hoveredWeapon = weapon;
+                hoverBox = { x: bx, y, w, h };
+            }
+        }
+
+        if (hoveredWeapon) this.drawSlotTooltip(ctx, hoveredWeapon, hoverBox);
+    }
+
+    drawSlotTooltip(ctx, weapon, box) {
+        const text = `${weapon.name}  ·  Daño: ${weapon.damage}`;
+        const tw = 170;
+        const th = 22;
+        let tx = box.x + box.w / 2 - tw / 2;
+        let ty = box.y - th - 6;
+        if (ty < 0) ty = box.y + box.h + 6;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(tx, ty, tw, th);
+        ctx.strokeStyle = '#888';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(tx, ty, tw, th);
+
+        ctx.fillStyle = weapon.color;
+        ctx.font = 'bold 12px monospace';
+        ctx.fillText(text, tx + tw / 2, ty + 16);
+    }
+
+    drawIcon(ctx, weapon, cx, cy, size) {
+        const img = weapon.icon;
+        if (img && img.complete && img.naturalWidth > 0) {
+            ctx.save();
+            ctx.globalAlpha = weapon.stock <= 0 && !weapon.infinite ? 0.35 : 1;
+            ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+            ctx.restore();
         }
     }
 
@@ -313,6 +406,7 @@ class Player {
         window.removeEventListener('keydown', this.onKeyDown);
         window.removeEventListener('keyup', this.onKeyUp);
         window.removeEventListener('mousedown', this.onShoot);
+        window.removeEventListener('mousemove', this.onMouseMoveUI);
     }
 
     update(terrain) {

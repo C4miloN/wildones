@@ -12,6 +12,13 @@ class Weapon {
         this.guided = !!(this.stats.guided);
         this.color = this.stats.color || '#ff6600';
         this.infinite = !!(this.stats.infinite);
+        this.spawnFrom = this.stats.spawnFrom || 'muzzle';
+
+        this.icon = new Image();
+        this.icon.src = this.stats.icon || 'img/guns/default.png';
+
+        this.projectileImage = new Image();
+        this.projectileImage.src = this.stats.projectileImage || 'img/projectile/default.png';
 
         this.fireRate = this.stats.fireRate || 18;
         this.cooldown = 0;
@@ -75,10 +82,17 @@ class Weapon {
 
     calculateTrajectory(canvas) {
         const pos = this.getCanvasMousePos(canvas);
+        this.aimPoint = pos;
+
+        if (this.spawnFrom === 'sky') {
+            this.angle = Math.PI / 2;
+            this.power = 4;
+            this.parabolaPoints = [];
+            return { vx: 0, vy: this.power };
+        }
+
         const px = this.player.getCenterX();
         const py = this.player.getCenterY();
-
-        this.aimPoint = pos;
 
         const dx = pos.x - px;
         const dy = pos.y - py;
@@ -115,11 +129,11 @@ class Weapon {
 
         const canvas = document.querySelector('canvas');
         const { vx, vy } = this.calculateTrajectory(canvas);
-        const muzzle = this.getMuzzle();
+        const spawn = this.getSpawnPoint();
 
         if (window.game && window.game.projectiles) {
             window.game.projectiles.push(
-                new Projectile(muzzle.x, muzzle.y, vx, vy, this, this.aimPoint.x, this.aimPoint.y)
+                new Projectile(spawn.x, spawn.y, vx, vy, this, this.aimPoint.x, this.aimPoint.y)
             );
         }
 
@@ -135,6 +149,16 @@ class Weapon {
     startReload() {
         this.reloading = true;
         this.reloadTimer = this.reloadTime;
+    }
+
+    getSpawnPoint() {
+        if (this.spawnFrom === 'sky') {
+            return {
+                x: CONFIG.CANVAS_WIDTH / 2,
+                y: CONFIG.SKY_SPAWN_Y !== undefined ? CONFIG.SKY_SPAWN_Y : -30
+            };
+        }
+        return this.getMuzzle();
     }
 
     getMuzzle() {
@@ -164,6 +188,8 @@ class Weapon {
     }
 
     draw(ctx) {
+        if (this.spawnFrom !== 'muzzle') return;
+
         const px = this.player.getCenterX();
         const py = this.player.getCenterY();
         const muzzle = this.getMuzzle();

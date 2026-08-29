@@ -127,6 +127,11 @@ class Game {
         ctx.fillStyle = '#ffd700';
         ctx.fillText(`Oro: ${this.player.gold} · Proyectiles: ${this.projectiles.length}`, 20, 98);
 
+        const icon = weapon.icon;
+        if (icon && icon.complete && icon.naturalWidth > 0) {
+            ctx.drawImage(icon, 260, 18, 34, 34);
+        }
+
         this.drawBottomBar(ctx);
         this.player.drawSlots(ctx);
 

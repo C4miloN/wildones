@@ -14,7 +14,10 @@ class Projectile {
         this.gravity = weapon ? weapon.gravity : CONFIG.PROJECTILE_GRAVITY;
         this.bounceCount = weapon ? weapon.bounceCount : 0;
         this.guided = weapon ? weapon.guided : false;
+        this.breaksTerrain = weapon ? weapon.breaksTerrain : true;
+        this.maxLifetime = weapon && weapon.maxLifetime !== undefined ? weapon.maxLifetime : Infinity;
         this.color = weapon ? weapon.color : '#ff6600';
+        this.image = weapon && weapon.projectileImage ? weapon.projectileImage : null;
         this.targetX = targetX;
         this.targetY = targetY;
 
@@ -30,6 +33,11 @@ class Projectile {
         if (!this.alive) return;
 
         this.lifetime++;
+
+        if (this.lifetime >= this.maxLifetime) {
+            this.alive = false;
+            return;
+        }
 
         this.trail.push({ x: this.x, y: this.y });
         if (this.trail.length > this.trailMaxLength) this.trail.shift();
@@ -56,7 +64,12 @@ class Projectile {
         if (player && player.isAlive() && this.lifetime > 8 && this.hitsPlayer(player)) {
             this.directHit = true;
             this.damagePlayer(player);
-            this.explode(terrain);
+
+            if (this.breaksTerrain) {
+                this.explode(terrain);
+            } else {
+                this.alive = false;
+            }
             return;
         }
 
@@ -65,12 +78,20 @@ class Projectile {
                 this.bounce(terrain);
                 return;
             }
+            if (!this.breaksTerrain) {
+                this.bounce(terrain);
+                return;
+            }
             this.explode(terrain);
             return;
         }
 
         if (traveled >= this.range) {
-            this.explode(terrain);
+            if (this.breaksTerrain) {
+                this.explode(terrain);
+            } else {
+                this.alive = false;
+            }
             return;
         }
 
@@ -156,18 +177,23 @@ class Projectile {
             ctx.fill();
         }
 
-        const gradient = ctx.createRadialGradient(
-            this.x, this.y, 0,
-            this.x, this.y, this.radius
-        );
-        gradient.addColorStop(0, '#fff');
-        gradient.addColorStop(0.4, this.color);
-        gradient.addColorStop(1, this.shade(this.color, -80));
+        const size = this.radius * 2;
+        if (this.image && this.image.complete && this.image.naturalWidth > 0) {
+            ctx.drawImage(this.image, this.x - this.radius, this.y - this.radius, size, size);
+        } else {
+            const gradient = ctx.createRadialGradient(
+                this.x, this.y, 0,
+                this.x, this.y, this.radius
+            );
+            gradient.addColorStop(0, '#fff');
+            gradient.addColorStop(0.4, this.color);
+            gradient.addColorStop(1, this.shade(this.color, -80));
 
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fill();
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
 
         if (this.guided) {
             ctx.strokeStyle = 'rgba(255,255,255,0.6)';
